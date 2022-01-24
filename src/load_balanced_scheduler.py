@@ -10,8 +10,8 @@ import sys
 import anki
 import datetime
 from aqt import mw
-from anki import version
-from anki.sched import Scheduler
+from aqt import gui_hooks
+from anki.scheduler.v2 import Scheduler as V2Scheduler
 
 
 def log_info(message):
@@ -24,15 +24,15 @@ def log_debug(message):
         sys.stdout.write(message)
 
 
-def load_balanced_ivl(self, ivl):
+def load_balanced_ivl(card, ivl):
     """Return the (largest) interval that has the least number of cards and falls within the 'fuzz'"""
     orig_ivl = int(ivl)
-    min_ivl, max_ivl = self._fuzzIvlRange(orig_ivl)
+    min_ivl, max_ivl = V2Scheduler._fuzzIvlRange(V2Scheduler,orig_ivl)
     min_num_cards = 18446744073709551616        # Maximum number of rows in an sqlite table?
     best_ivl = 1
     for check_ivl in range(min_ivl, max_ivl + 1):
-        num_cards = self.col.db.scalar("""select count() from cards where due = ? and queue = 2""",
-                                       self.today + check_ivl)
+        num_cards = card.col.db.scalar("""select count() from cards where due = ? and queue = 2""",
+                                       card.col.sched.today + check_ivl)
         if num_cards <= min_num_cards:
             best_ivl = check_ivl
             log_debug("> ")
@@ -44,12 +44,10 @@ def load_balanced_ivl(self, ivl):
              .format(str(datetime.datetime.now()), orig_ivl, min_ivl, max_ivl, best_ivl))
     return best_ivl
 
+def adjust_ivl(self,
+              card,
+              ease):
+    assert card is not None
+    card.ivl = load_balanced_ivl(card, card.ivl)
 
-# Patch Anki 2.0 and Anki 2.1 default scheduler
-anki.sched.Scheduler._fuzzedIvl = load_balanced_ivl
-
-
-# Patch Anki 2.1 experimental v2 scheduler
-if version.startswith("2.1"):
-    from anki.schedv2 import Scheduler
-    anki.schedv2.Scheduler._fuzzedIvl = load_balanced_ivl
+gui_hooks.reviewer_did_answer_card.append(adjust_ivl)
